@@ -220,25 +220,34 @@ def predict_batch(model, sequence_tensor, device, batch_size=128):
     all_embeddings = []
     
     with torch.no_grad():
-        for (batch_sequences,) in loader:
-            batch_sequences = batch_sequences.to(device)
-            # FIXED: Separated these lines to avoid tracing bugs
-            outputs = model(batch_sequences)
-            all_embeddings.append(outputs['embedding'].cpu().numpy())
-            
-            for i in range(batch_sequences.size(0)):
-                pred_row = {}
-                max_confidence = 0
-                for rank in LABEL_COLUMNS:
-                    probs = torch.softmax(outputs[rank][i], dim=0)
-                    confidence, pred_idx = torch.max(probs, dim=0)
-                    pred_row[rank] = {'index': pred_idx.item(), 'confidence': confidence.item()}
-                    if confidence.item() > max_confidence: 
-                        max_confidence = confidence.item()
+        try:
+            for (batch_sequences,) in loader:
+                batch_sequences = batch_sequences.to(device)
+                outputs = model(batch_sequences)
                 
-                pred_row['max_confidence'] = max_confidence
-                pred_row['status'] = "Known" if max_confidence >= CONFIDENCE_THRESHOLD else "Potentially Novel"
-                all_predictions.append(pred_row)
+                # Added .detach() to prevent the most common NumPy conversion RuntimeError
+                all_embeddings.append(outputs['embedding'].detach().cpu().numpy())
+                
+                for i in range(batch_sequences.size(0)):
+                    pred_row = {}
+                    max_confidence = 0
+                    for rank in LABEL_COLUMNS:
+                        probs = torch.softmax(outputs[rank][i], dim=0)
+                        confidence, pred_idx = torch.max(probs, dim=0)
+                        pred_row[rank] = {'index': pred_idx.item(), 'confidence': confidence.item()}
+                        if confidence.item() > max_confidence: 
+                            max_confidence = confidence.item()
+                    
+                    pred_row['max_confidence'] = max_confidence
+                    pred_row['status'] = "Known" if max_confidence >= CONFIDENCE_THRESHOLD else "Potentially Novel"
+                    all_predictions.append(pred_row)
+                    
+        except Exception as e:
+            # This catches the hidden error and forces it onto the screen!
+            import traceback
+            st.error(f"🔥 Critical PyTorch Error: {str(e)}")
+            st.code(traceback.format_exc())
+            st.stop()
                 
     return all_predictions, np.vstack(all_embeddings)
 
