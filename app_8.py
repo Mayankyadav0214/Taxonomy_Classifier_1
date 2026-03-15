@@ -10,6 +10,7 @@ import umap
 import plotly.express as px
 import time
 import traceback
+import os
 
 # --- 1. Page Configuration & Advanced Custom CSS ---
 st.set_page_config(
@@ -276,7 +277,8 @@ def page_model_details(test_accuracies, num_classes):
         with st.container(border=True):
             st.subheader("Model Architecture")
             st.write("A **1D Convolutional Neural Network (CNN)** with a multi-head output, built in PyTorch.")
-            st.image("cnn_architecture.png", caption="Detailed Diagram of the 1D CNN Architecture")
+            if os.path.exists("cnn_architecture.png"):
+                st.image("cnn_architecture.png", caption="Detailed Diagram of the 1D CNN Architecture")
             
     with col2:
         with st.container(border=True):
