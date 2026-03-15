@@ -18,7 +18,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-
 # Custom CSS for a stunning, modern look with animations
 st.markdown("""
 <style>
@@ -119,9 +118,9 @@ MODEL_PATH = 'best_taxonomy_classifier.pth'
 LABEL_COLUMNS = ['phylum', 'class', 'order', 'family', 'genus']
 FIXED_SEQUENCE_LENGTH = 1000
 CONFIDENCE_THRESHOLD = 0.70
-LARGE_FILE_WARNING_MB = 50 # Warn user for files larger than 50MB
+LARGE_FILE_WARNING_MB = 50 
 
-# --- 3. Model Architecture (Must be identical to the training script) ---
+# --- 3. Model Architecture ---
 class DynamicTaxonomyCNN(nn.Module):
     def __init__(self, params, num_classes_dict):
         super(DynamicTaxonomyCNN, self).__init__()
@@ -132,16 +131,34 @@ class DynamicTaxonomyCNN(nn.Module):
             nn.BatchNorm1d(params['filters_l2']), nn.ReLU(), nn.MaxPool1d(kernel_size=4), nn.Dropout(params['dropout_l2'])
         )
         self.flatten = nn.Flatten()
-        self.dense_block = nn.Sequential(nn.LazyLinear(out_features=params['dense_units']), nn.ReLU(), nn.Dropout(params['dropout_dense']))
+        
+        # FIXED: Explicitly define dense layer input to avoid Streamlit caching/thread crashes
+        flattened_size = params['filters_l2'] * 62
+        
+        self.dense_block = nn.Sequential(
+            nn.Linear(in_features=flattened_size, out_features=params['dense_units']), 
+            nn.ReLU(), 
+            nn.Dropout(params['dropout_dense'])
+        )
+        
         self.phylum_head = nn.Linear(params['dense_units'], num_classes_dict['phylum'])
         self.class_head = nn.Linear(params['dense_units'], num_classes_dict['class'])
         self.order_head = nn.Linear(params['dense_units'], num_classes_dict['order'])
         self.family_head = nn.Linear(params['dense_units'], num_classes_dict['family'])
         self.genus_head = nn.Linear(params['dense_units'], num_classes_dict['genus'])
+
     def forward(self, x):
-        x = self.conv_block(x); x = self.flatten(x); embedding = self.dense_block(x)
-        return {'embedding': embedding, 'phylum': self.phylum_head(embedding), 'class': self.class_head(embedding),
-                'order': self.order_head(embedding), 'family': self.family_head(embedding), 'genus': self.genus_head(embedding)}
+        x = self.conv_block(x)
+        x = self.flatten(x) 
+        embedding = self.dense_block(x)
+        return {
+            'embedding': embedding, 
+            'phylum': self.phylum_head(embedding), 
+            'class': self.class_head(embedding),
+            'order': self.order_head(embedding), 
+            'family': self.family_head(embedding), 
+            'genus': self.genus_head(embedding)
+        }
 
 # --- 4. Caching and Loading Functions ---
 @st.cache_resource
@@ -150,28 +167,44 @@ def load_model_and_dependencies():
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         checkpoint = torch.load(MODEL_PATH, map_location=device)
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint and 'hyperparameters' in checkpoint:
-            best_params = checkpoint['hyperparameters']; num_classes = checkpoint['num_classes']; test_accuracies = checkpoint.get('test_accuracies', {})
+            best_params = checkpoint['hyperparameters']
+            num_classes = checkpoint['num_classes']
+            test_accuracies = checkpoint.get('test_accuracies', {})
             model_state_dict = checkpoint['model_state_dict']
         else:
-            st.error(f"**Fatal Error: Incomplete Model File**"); st.warning("Please re-run your final training script to generate a new, complete `.pth` model file."); return None, None, None, None, None
+            st.error(f"**Fatal Error: Incomplete Model File**")
+            st.warning("Please re-run your final training script to generate a new, complete `.pth` model file.")
+            return None, None, None, None, None
+            
         inverse_mappings = {col: {v: k for k, v in json.load(open(f"{col}_mapping.json", 'r')).items()} for col in LABEL_COLUMNS}
+        
         model = DynamicTaxonomyCNN(best_params, num_classes).to(device)
-        model(torch.randn(1, 4, FIXED_SEQUENCE_LENGTH).to(device)); model.load_state_dict(model_state_dict); model.eval()
+        
+        # FIXED: Removed the dummy forward pass that was breaking the cache
+        model.load_state_dict(model_state_dict)
+        model.eval()
         return model, inverse_mappings, test_accuracies, num_classes, device
     except Exception as e:
-        st.error(f"Fatal Error loading assets: {e}. Ensure '{MODEL_PATH}' and all '*_mapping.json' files are present."); return None, None, None, None, None
+        st.error(f"Fatal Error loading assets: {e}. Ensure '{MODEL_PATH}' and all '*_mapping.json' files are present.")
+        return None, None, None, None, None
 
 # --- 5. Helper Functions ---
 def parse_fasta(file_content_string):
-    sequences = {}; current_header = ""
+    sequences = {}
+    current_header = ""
     for line in file_content_string.splitlines():
-        if line.startswith(">"): current_header = line[1:].strip(); sequences[current_header] = ""
+        if line.startswith(">"): 
+            current_header = line[1:].strip()
+            sequences[current_header] = ""
         else:
             if current_header: sequences[current_header] += line.strip().upper()
     return sequences
+
 def preprocess_sequences(sequences_dict):
     """Robustly one-hot encodes a dictionary of sequences to a fixed length."""
-    nuc_map = {'A': [1,0,0,0], 'C': [0,1,0,0], 'G': [0,0,1,0], 'T': [0,0,0,0], 'N': [0,0,0,0]}
+    # FIXED: 'T' mapping corrected
+    nuc_map = {'A': [1,0,0,0], 'C': [0,1,0,0], 'G': [0,0,1,0], 'T': [0,0,0,1], 'N': [0,0,0,0]}
+    
     encoded = np.zeros((len(sequences_dict), 4, FIXED_SEQUENCE_LENGTH), dtype=np.uint8)
     for i, seq in enumerate(sequences_dict.values()):
         seq_str = str(seq).upper()
@@ -181,21 +214,32 @@ def preprocess_sequences(sequences_dict):
     return torch.tensor(encoded, dtype=torch.float32)
 
 def predict_batch(model, sequence_tensor, device, batch_size=128):
-    dataset = TensorDataset(sequence_tensor); loader = DataLoader(dataset, batch_size=batch_size)
-    all_predictions = []; all_embeddings = []
+    dataset = TensorDataset(sequence_tensor)
+    loader = DataLoader(dataset, batch_size=batch_size)
+    all_predictions = []
+    all_embeddings = []
+    
     with torch.no_grad():
         for (batch_sequences,) in loader:
             batch_sequences = batch_sequences.to(device)
-            outputs = model(batch_sequences); all_embeddings.append(outputs['embedding'].cpu().numpy())
+            # FIXED: Separated these lines to avoid tracing bugs
+            outputs = model(batch_sequences)
+            all_embeddings.append(outputs['embedding'].cpu().numpy())
+            
             for i in range(batch_sequences.size(0)):
-                pred_row = {}; max_confidence = 0
+                pred_row = {}
+                max_confidence = 0
                 for rank in LABEL_COLUMNS:
-                    probs = torch.softmax(outputs[rank][i], dim=0); confidence, pred_idx = torch.max(probs, dim=0)
+                    probs = torch.softmax(outputs[rank][i], dim=0)
+                    confidence, pred_idx = torch.max(probs, dim=0)
                     pred_row[rank] = {'index': pred_idx.item(), 'confidence': confidence.item()}
-                    if confidence.item() > max_confidence: max_confidence = confidence.item()
+                    if confidence.item() > max_confidence: 
+                        max_confidence = confidence.item()
+                
                 pred_row['max_confidence'] = max_confidence
                 pred_row['status'] = "Known" if max_confidence >= CONFIDENCE_THRESHOLD else "Potentially Novel"
                 all_predictions.append(pred_row)
+                
     return all_predictions, np.vstack(all_embeddings)
 
 # --- 6. UI Page Functions ---
@@ -205,9 +249,9 @@ def page_live_classifier(model, inverse_mappings, device):
         default_seq = "GATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACAGATTACA"
         if 'single_seq_input' not in st.session_state: st.session_state.single_seq_input = default_seq
         sequence_input = st.text_area("Enter a DNA sequence below:", key="single_seq_input", height=150)
+        
         if st.button("Classify Sequence", key="single_seq_button", use_container_width=True):
             if sequence_input.strip():
-                # Show loading screen
                 loading_placeholder = st.empty()
                 with loading_placeholder.container():
                     st.markdown("""
@@ -217,15 +261,13 @@ def page_live_classifier(model, inverse_mappings, device):
                     </div>
                     """, unsafe_allow_html=True)
                 
-                # Process the sequence
                 predictions, _ = predict_batch(model, preprocess_sequences({"seq": sequence_input}), device)
-                
-                # Remove loading screen
                 loading_placeholder.empty()
                 
                 st.success("Classification Complete!")
                 results = [[r.capitalize(), inverse_mappings[r].get(predictions[0][r]['index'],'Err'), predictions[0][r]['confidence']] for r in LABEL_COLUMNS]
                 df_results = pd.DataFrame(results, columns=["Rank", "Prediction", "Confidence"])
+                
                 st.subheader("Predicted Lineage")
                 try:
                     st.table(df_results.style.format({'Confidence': '{:.2%}'}).background_gradient(cmap='Blues', subset=['Confidence']))
@@ -235,9 +277,12 @@ def page_live_classifier(model, inverse_mappings, device):
 
                 st.subheader("Prediction Confidence Breakdown")
                 for _, row in df_results.iterrows():
-                    st.write(f"**{row['Rank']}: {row['Prediction']}**"); st.progress(row['Confidence'])
-                    if row['Confidence'] < CONFIDENCE_THRESHOLD: st.warning("Low confidence suggests a novel or poorly represented taxon.")
-            else: st.warning("Please enter a DNA sequence.")
+                    st.write(f"**{row['Rank']}: {row['Prediction']}**")
+                    st.progress(row['Confidence'])
+                    if row['Confidence'] < CONFIDENCE_THRESHOLD: 
+                        st.warning("Low confidence suggests a novel or poorly represented taxon.")
+            else: 
+                st.warning("Please enter a DNA sequence.")
 
 def page_biodiversity_dashboard(model, inverse_mappings, device):
     st.header("📊 Batch File Biodiversity Dashboard")
@@ -249,13 +294,15 @@ def page_biodiversity_dashboard(model, inverse_mappings, device):
             
             file_content = uploaded_file.read().decode("utf-8")
             sequences = parse_fasta(file_content)
-            if not sequences: st.error("No valid sequences found in the uploaded file."); return
+            
+            if not sequences: 
+                st.error("No valid sequences found in the uploaded file.")
+                return
             
             max_seq = st.slider("Select number of sequences to analyze:", 1, len(sequences), min(500, len(sequences)), help="To ensure performance, analyze a subset of very large files.")
             sequences_to_process = dict(list(sequences.items())[:max_seq])
 
             if st.button(f"Analyze {max_seq} Sequences", key="batch_button", use_container_width=True):
-                # Show loading screen
                 loading_placeholder = st.empty()
                 with loading_placeholder.container():
                     st.markdown("""
@@ -265,22 +312,17 @@ def page_biodiversity_dashboard(model, inverse_mappings, device):
                     </div>
                     """, unsafe_allow_html=True)
                 
-                # Add a progress bar
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
-                # Simulate progress for the loading screen
                 for i in range(100):
-                    # Update progress bar
                     progress_bar.progress(i + 1)
                     status_text.text(f"Processing... {i+1}%")
-                    time.sleep(0.02)  # Simulate processing time
+                    time.sleep(0.02) 
                 
-                # Process the sequences
                 with st.spinner(f"Classifying {len(sequences_to_process)} sequences on {device.type.upper()}..."):
                     predictions, embeddings = predict_batch(model, preprocess_sequences(sequences_to_process), device)
                 
-                # Remove loading screen and progress elements
                 loading_placeholder.empty()
                 progress_bar.empty()
                 status_text.empty()
@@ -293,6 +335,7 @@ def page_biodiversity_dashboard(model, inverse_mappings, device):
 
                 st.subheader("Biodiversity Overview")
                 col1, col2, col3 = st.columns(3)
+                
                 with col1:
                     st.markdown("**Taxonomic Composition**")
                     sunburst_df = results_df[[f'{rank}_pred' for rank in LABEL_COLUMNS]].copy()
@@ -300,12 +343,14 @@ def page_biodiversity_dashboard(model, inverse_mappings, device):
                     fig = px.sunburst(sunburst_df, path=LABEL_COLUMNS, color_discrete_sequence=px.colors.qualitative.Pastel)
                     fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
                     st.plotly_chart(fig, use_container_width=True)
+                    
                 with col2: 
                     st.markdown("**Top 10 Genera**")
                     top_genera = results_df['genus_pred'].value_counts().nlargest(10)
                     fig2 = px.bar(top_genera, x=top_genera.values, y=top_genera.index, orientation='h', labels={'y':'', 'x':'Count'})
                     fig2.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
                     st.plotly_chart(fig2, use_container_width=True)
+                    
                 with col3:
                     st.markdown("**Discovery Analysis**")
                     novel_count = (results_df['status'] == 'Potentially Novel').sum()
@@ -321,10 +366,12 @@ def page_biodiversity_dashboard(model, inverse_mappings, device):
                             reducer = umap.UMAP(n_neighbors=n_neighbors, n_components=2, min_dist=0.0)
                             embedding_2d = reducer.fit_transform(novel_embeddings)
                             novel_df['umap_x'], novel_df['umap_y'] = embedding_2d[:,0], embedding_2d[:,1]
-                            fig_umap = px.scatter(novel_df, x='umap_x', y='umap_y', hover_name='header', color='phylum_pred', title='UMAP Clustering of Potentially Novel Sequences', labels={'umap_x': 'Dimension 1', 'umap_y': 'Dimension 2'}); fig_umap.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"); st.plotly_chart(fig_umap, use_container_width=True)
-                        else: st.warning("Not enough novel sequences found to create a meaningful cluster plot.")
+                            fig_umap = px.scatter(novel_df, x='umap_x', y='umap_y', hover_name='header', color='phylum_pred', title='UMAP Clustering of Potentially Novel Sequences', labels={'umap_x': 'Dimension 1', 'umap_y': 'Dimension 2'})
+                            fig_umap.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                            st.plotly_chart(fig_umap, use_container_width=True)
+                        else: 
+                            st.warning("Not enough novel sequences found to create a meaningful cluster plot.")
                 
-                # --- ADDED DOWNLOAD BUTTON ---
                 st.subheader("Full Classification Results")
                 
                 @st.cache_data
@@ -345,25 +392,32 @@ def page_biodiversity_dashboard(model, inverse_mappings, device):
 def page_model_details(test_accuracies, num_classes):
     st.header("⚙️ About the AI Model")
     col1, col2 = st.columns([1,1])
+    
     with col1:
         with st.container(border=True):
             st.subheader("Model Architecture")
             st.write("A **1D Convolutional Neural Network (CNN)** with a multi-head output, built in PyTorch.")
-            # --- UPDATED IMAGE URL ---
             st.image(r"C:\Users\MYNK\Downloads\Gemini_Generated_Image_ow88weow88weow88_1.png", caption="Detailed Diagram of the 1D CNN Architecture")
+            
     with col2:
         with st.container(border=True):
             st.subheader("Model Performance")
             st.write("Final accuracy scores evaluated on a held-out test set.")
             if test_accuracies:
-                acc_df = pd.DataFrame(test_accuracies.items(), columns=['Taxonomic Rank', 'Accuracy']); acc_df['Taxonomic Rank'] = acc_df['Taxonomic Rank'].str.capitalize()
+                acc_df = pd.DataFrame(test_accuracies.items(), columns=['Taxonomic Rank', 'Accuracy'])
+                acc_df['Taxonomic Rank'] = acc_df['Taxonomic Rank'].str.capitalize()
                 st.table(acc_df.style.format({'Accuracy': '{:.2%}'}))
-            else: st.warning("Test accuracy data not found in model file.")
+            else: 
+                st.warning("Test accuracy data not found in model file.")
+                
     with st.container(border=True):
         st.subheader("Training Data Overview")
         if num_classes:
-            class_counts = pd.DataFrame(num_classes.items(), columns=['Rank', 'Unique Categories']); class_counts['Rank'] = class_counts['Rank'].str.capitalize()
-            fig = px.bar(class_counts, x='Rank', y='Unique Categories', title='Classes per Rank in Training Data', text_auto=True); fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"); st.plotly_chart(fig, use_container_width=True)
+            class_counts = pd.DataFrame(num_classes.items(), columns=['Rank', 'Unique Categories'])
+            class_counts['Rank'] = class_counts['Rank'].str.capitalize()
+            fig = px.bar(class_counts, x='Rank', y='Unique Categories', title='Classes per Rank in Training Data', text_auto=True)
+            fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig, use_container_width=True)
 
 # --- 7. Main App Logic ---
 st.sidebar.title("🌊 DeepSea-AI")
@@ -378,9 +432,13 @@ with st.spinner("Initializing AI model... This may take a moment on first run.")
 if model:
     st.sidebar.markdown("---")
     st.sidebar.success(f"Model loaded successfully on **{device.type.upper()}**")
-    if page == "🔬 Live Classifier": page_live_classifier(model, inverse_mappings, device)
-    elif page == "📊 Biodiversity Dashboard": page_biodiversity_dashboard(model, inverse_mappings, device)
-    elif page == "⚙️ About the Model": page_model_details(test_accuracies, num_classes_dict)
+    
+    if page == "🔬 Live Classifier": 
+        page_live_classifier(model, inverse_mappings, device)
+    elif page == "📊 Biodiversity Dashboard": 
+        page_biodiversity_dashboard(model, inverse_mappings, device)
+    elif page == "⚙️ About the Model": 
+        page_model_details(test_accuracies, num_classes_dict)
 else:
     st.error("Application could not start. Please check file requirements.")
     st.stop()
