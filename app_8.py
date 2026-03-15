@@ -122,7 +122,7 @@ def parse_fasta(file_content_string):
     return sequences
 
 def preprocess_sequences(sequences_dict):
-    nuc_map = {'A': [1,0,0,0], 'C': [0,1,0,0], 'G': [0,0,1,0], 'T': [0,0,0,1], 'N': [0,0,0,0]}
+    nuc_map = {'A': [1,0,0,0], 'C': [0,1,0,0], 'G': [0,0,1,0], 'T': [0,0,0,0], 'N': [0,0,0,0]}
     encoded = np.zeros((len(sequences_dict), 4, FIXED_SEQUENCE_LENGTH), dtype=np.uint8)
     for i, seq in enumerate(sequences_dict.values()):
         seq_str = str(seq).upper()
@@ -276,6 +276,7 @@ def page_model_details(test_accuracies, num_classes):
         with st.container(border=True):
             st.subheader("Model Architecture")
             st.write("A **1D Convolutional Neural Network (CNN)** with a multi-head output, built in PyTorch.")
+            st.image("cnn_architecture.png", caption="Detailed Diagram of the 1D CNN Architecture")
             
     with col2:
         with st.container(border=True):
