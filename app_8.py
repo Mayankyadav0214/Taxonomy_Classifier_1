@@ -8,7 +8,8 @@ import json
 import math
 import umap
 import plotly.express as px
-import time  # Added for progress simulation
+import time
+import traceback
 
 # --- 1. Page Configuration & Advanced Custom CSS ---
 st.set_page_config(
@@ -21,95 +22,19 @@ st.set_page_config(
 # Custom CSS for a stunning, modern look with animations
 st.markdown("""
 <style>
-    /* Animated Gradient Background */
-    .stApp {
-        background: linear-gradient(-45deg, #0c101c, #121827, #003049, #0c101c);
-        background-size: 400% 400%;
-        animation: gradient 15s ease infinite;
-        color: #e0e0e0;
-    }
-    @keyframes gradient {
-        0% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
-    }
-
-    /* Sidebar styling */
-    .st-emotion-cache-16txtl3 {
-        background-color: rgba(18, 24, 39, 0.8);
-        backdrop-filter: blur(5px);
-        border-right: 1px solid #2d3b53;
-    }
-    
-    /* Containers and cards with hover effect */
-    .st-emotion-cache-z5fcl4, .metric-card {
-        border: 1px solid #2d3b53;
-        border-radius: 10px;
-        padding: 20px !important;
-        background-color: rgba(18, 24, 39, 0.8);
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
-        transition: all 0.3s ease-in-out;
-    }
-    .st-emotion-cache-z5fcl4:hover, .metric-card:hover {
-        box-shadow: 0 0 20px rgba(0, 180, 216, 0.6);
-        border-color: #00b4d8;
-    }
-
-    /* Buttons */
-    .stButton>button {
-        background-color: #00b4d8;
-        color: white;
-        border-radius: 8px;
-        border: none;
-        padding: 10px 20px;
-        transition: all 0.3s ease;
-        box-shadow: 0 0 15px rgba(0, 180, 216, 0.4);
-    }
-    .stButton>button:hover {
-        background-color: #0077b6;
-        box-shadow: 0 0 25px rgba(0, 180, 216, 0.7);
-        transform: scale(1.02);
-    }
-
-    /* Headers and titles */
+    .stApp { background: linear-gradient(-45deg, #0c101c, #121827, #003049, #0c101c); background-size: 400% 400%; animation: gradient 15s ease infinite; color: #e0e0e0; }
+    @keyframes gradient { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+    .st-emotion-cache-16txtl3 { background-color: rgba(18, 24, 39, 0.8); backdrop-filter: blur(5px); border-right: 1px solid #2d3b53; }
+    .st-emotion-cache-z5fcl4, .metric-card { border: 1px solid #2d3b53; border-radius: 10px; padding: 20px !important; background-color: rgba(18, 24, 39, 0.8); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4); transition: all 0.3s ease-in-out; }
+    .st-emotion-cache-z5fcl4:hover, .metric-card:hover { box-shadow: 0 0 20px rgba(0, 180, 216, 0.6); border-color: #00b4d8; }
+    .stButton>button { background-color: #00b4d8; color: white; border-radius: 8px; border: none; padding: 10px 20px; transition: all 0.3s ease; box-shadow: 0 0 15px rgba(0, 180, 216, 0.4); }
+    .stButton>button:hover { background-color: #0077b6; box-shadow: 0 0 25px rgba(0, 180, 216, 0.7); transform: scale(1.02); }
     h1, h2, h3 { color: #ade8f4; text-shadow: 0 0 5px #00b4d8; }
-    
-    /* Custom metric cards */
-    .metric-card { padding: 15px; text-align: center; }
-    .metric-card-label { font-size: 1.1em; color: #94a3b8; }
-    .metric-card-value { font-size: 2em; font-weight: bold; color: #ffffff; }
-    .metric-card-delta { font-size: 1.2em; color: #00b4d8; }
-    
-    /* Loading screen styling */
-    .loading-screen {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(12, 16, 28, 0.9);
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        z-index: 9999;
-    }
-    .loading-spinner {
-        width: 50px;
-        height: 50px;
-        border: 5px solid rgba(0, 180, 216, 0.3);
-        border-radius: 50%;
-        border-top-color: #00b4d8;
-        animation: spin 1s ease-in-out infinite;
-    }
-    @keyframes spin {
-        to { transform: rotate(360deg); }
-    }
-    .loading-text {
-        margin-top: 20px;
-        color: #ade8f4;
-        font-size: 1.2em;
-    }
+    .metric-card { padding: 15px; text-align: center; } .metric-card-label { font-size: 1.1em; color: #94a3b8; } .metric-card-value { font-size: 2em; font-weight: bold; color: #ffffff; } .metric-card-delta { font-size: 1.2em; color: #00b4d8; }
+    .loading-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(12, 16, 28, 0.9); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 9999; }
+    .loading-spinner { width: 50px; height: 50px; border: 5px solid rgba(0, 180, 216, 0.3); border-radius: 50%; border-top-color: #00b4d8; animation: spin 1s ease-in-out infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text { margin-top: 20px; color: #ade8f4; font-size: 1.2em; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -132,7 +57,6 @@ class DynamicTaxonomyCNN(nn.Module):
         )
         self.flatten = nn.Flatten()
         
-        # FIXED: Explicitly define dense layer input to avoid Streamlit caching/thread crashes
         flattened_size = params['filters_l2'] * 62
         
         self.dense_block = nn.Sequential(
@@ -173,19 +97,16 @@ def load_model_and_dependencies():
             model_state_dict = checkpoint['model_state_dict']
         else:
             st.error(f"**Fatal Error: Incomplete Model File**")
-            st.warning("Please re-run your final training script to generate a new, complete `.pth` model file.")
             return None, None, None, None, None
             
         inverse_mappings = {col: {v: k for k, v in json.load(open(f"{col}_mapping.json", 'r')).items()} for col in LABEL_COLUMNS}
         
         model = DynamicTaxonomyCNN(best_params, num_classes).to(device)
-        
-        # FIXED: Removed the dummy forward pass that was breaking the cache
         model.load_state_dict(model_state_dict)
         model.eval()
         return model, inverse_mappings, test_accuracies, num_classes, device
     except Exception as e:
-        st.error(f"Fatal Error loading assets: {e}. Ensure '{MODEL_PATH}' and all '*_mapping.json' files are present.")
+        st.error(f"Fatal Error loading assets: {e}")
         return None, None, None, None, None
 
 # --- 5. Helper Functions ---
@@ -201,10 +122,7 @@ def parse_fasta(file_content_string):
     return sequences
 
 def preprocess_sequences(sequences_dict):
-    """Robustly one-hot encodes a dictionary of sequences to a fixed length."""
-    # FIXED: 'T' mapping corrected
     nuc_map = {'A': [1,0,0,0], 'C': [0,1,0,0], 'G': [0,0,1,0], 'T': [0,0,0,1], 'N': [0,0,0,0]}
-    
     encoded = np.zeros((len(sequences_dict), 4, FIXED_SEQUENCE_LENGTH), dtype=np.uint8)
     for i, seq in enumerate(sequences_dict.values()):
         seq_str = str(seq).upper()
@@ -214,18 +132,18 @@ def preprocess_sequences(sequences_dict):
     return torch.tensor(encoded, dtype=torch.float32)
 
 def predict_batch(model, sequence_tensor, device, batch_size=128):
-    dataset = TensorDataset(sequence_tensor)
-    loader = DataLoader(dataset, batch_size=batch_size)
-    all_predictions = []
-    all_embeddings = []
-    
-    with torch.no_grad():
-        try:
+    # This try/except wraps the ENTIRE logic and safely returns the error as text
+    try:
+        dataset = TensorDataset(sequence_tensor)
+        loader = DataLoader(dataset, batch_size=batch_size)
+        all_predictions = []
+        all_embeddings = []
+        
+        with torch.no_grad():
             for (batch_sequences,) in loader:
                 batch_sequences = batch_sequences.to(device)
                 outputs = model(batch_sequences)
                 
-                # Added .detach() to prevent the most common NumPy conversion RuntimeError
                 all_embeddings.append(outputs['embedding'].detach().cpu().numpy())
                 
                 for i in range(batch_sequences.size(0)):
@@ -242,14 +160,11 @@ def predict_batch(model, sequence_tensor, device, batch_size=128):
                     pred_row['status'] = "Known" if max_confidence >= CONFIDENCE_THRESHOLD else "Potentially Novel"
                     all_predictions.append(pred_row)
                     
-        except Exception as e:
-            # This catches the hidden error and forces it onto the screen!
-            import traceback
-            st.error(f"🔥 Critical PyTorch Error: {str(e)}")
-            st.code(traceback.format_exc())
-            st.stop()
-                
-    return all_predictions, np.vstack(all_embeddings)
+        return all_predictions, np.vstack(all_embeddings)
+    except Exception as e:
+        # Instead of crashing, we return the error back to the app page
+        error_trace = traceback.format_exc()
+        return [{"error_caught": True, "trace": error_trace}], None
 
 # --- 6. UI Page Functions ---
 def page_live_classifier(model, inverse_mappings, device):
@@ -270,8 +185,15 @@ def page_live_classifier(model, inverse_mappings, device):
                     </div>
                     """, unsafe_allow_html=True)
                 
-                predictions, _ = predict_batch(model, preprocess_sequences({"seq": sequence_input}), device)
+                predictions, embeddings = predict_batch(model, preprocess_sequences({"seq": sequence_input}), device)
                 loading_placeholder.empty()
+                
+                # If embeddings is None, our error trapper caught a crash!
+                if embeddings is None:
+                    st.error("🚨 PyTorch Crash Captured! Streamlit can't hide it this time.")
+                    st.code(predictions[0]["trace"])
+                    st.info("Please copy and paste this stack trace back into our chat.")
+                    return
                 
                 st.success("Classification Complete!")
                 results = [[r.capitalize(), inverse_mappings[r].get(predictions[0][r]['index'],'Err'), predictions[0][r]['confidence']] for r in LABEL_COLUMNS]
@@ -281,7 +203,6 @@ def page_live_classifier(model, inverse_mappings, device):
                 try:
                     st.table(df_results.style.format({'Confidence': '{:.2%}'}).background_gradient(cmap='Blues', subset=['Confidence']))
                 except ImportError:
-                    st.info("Matplotlib not found. Displaying a plain table. Install it (`pip install matplotlib`) for colored tables.")
                     st.table(df_results.style.format({'Confidence': '{:.2%}'}))
 
                 st.subheader("Prediction Confidence Breakdown")
@@ -298,9 +219,6 @@ def page_biodiversity_dashboard(model, inverse_mappings, device):
     with st.container(border=True):
         uploaded_file = st.file_uploader("Upload a FASTA file of eDNA reads", type=["fasta", "fa", "txt"])
         if uploaded_file:
-            if uploaded_file.size > LARGE_FILE_WARNING_MB * 1024 * 1024:
-                st.warning(f"⚠️ **Large File Detected** ({uploaded_file.size / (1024*1024):.1f} MB). Processing may be slow. Use the slider below to analyze a manageable subset to prevent the app from running out of memory.")
-            
             file_content = uploaded_file.read().decode("utf-8")
             sequences = parse_fasta(file_content)
             
@@ -308,7 +226,7 @@ def page_biodiversity_dashboard(model, inverse_mappings, device):
                 st.error("No valid sequences found in the uploaded file.")
                 return
             
-            max_seq = st.slider("Select number of sequences to analyze:", 1, len(sequences), min(500, len(sequences)), help="To ensure performance, analyze a subset of very large files.")
+            max_seq = st.slider("Select number of sequences to analyze:", 1, len(sequences), min(500, len(sequences)))
             sequences_to_process = dict(list(sequences.items())[:max_seq])
 
             if st.button(f"Analyze {max_seq} Sequences", key="batch_button", use_container_width=True):
@@ -327,7 +245,7 @@ def page_biodiversity_dashboard(model, inverse_mappings, device):
                 for i in range(100):
                     progress_bar.progress(i + 1)
                     status_text.text(f"Processing... {i+1}%")
-                    time.sleep(0.02) 
+                    time.sleep(0.01) 
                 
                 with st.spinner(f"Classifying {len(sequences_to_process)} sequences on {device.type.upper()}..."):
                     predictions, embeddings = predict_batch(model, preprocess_sequences(sequences_to_process), device)
@@ -336,6 +254,11 @@ def page_biodiversity_dashboard(model, inverse_mappings, device):
                 progress_bar.empty()
                 status_text.empty()
                 
+                if embeddings is None:
+                    st.error("🚨 PyTorch Crash Captured!")
+                    st.code(predictions[0]["trace"])
+                    return
+                
                 st.success("Batch analysis complete!")
                 
                 headers = list(sequences_to_process.keys())
@@ -343,59 +266,6 @@ def page_biodiversity_dashboard(model, inverse_mappings, device):
                 results_df = pd.DataFrame(results_list)
 
                 st.subheader("Biodiversity Overview")
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.markdown("**Taxonomic Composition**")
-                    sunburst_df = results_df[[f'{rank}_pred' for rank in LABEL_COLUMNS]].copy()
-                    sunburst_df.columns = LABEL_COLUMNS
-                    fig = px.sunburst(sunburst_df, path=LABEL_COLUMNS, color_discrete_sequence=px.colors.qualitative.Pastel)
-                    fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                with col2: 
-                    st.markdown("**Top 10 Genera**")
-                    top_genera = results_df['genus_pred'].value_counts().nlargest(10)
-                    fig2 = px.bar(top_genera, x=top_genera.values, y=top_genera.index, orientation='h', labels={'y':'', 'x':'Count'})
-                    fig2.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-                    st.plotly_chart(fig2, use_container_width=True)
-                    
-                with col3:
-                    st.markdown("**Discovery Analysis**")
-                    novel_count = (results_df['status'] == 'Potentially Novel').sum()
-                    st.markdown(f'<div class="metric-card"><div class="metric-card-label">Novelty Score</div><div class="metric-card-value">{novel_count} / {len(results_df)}</div><div class="metric-card-delta">{(novel_count/len(results_df)):.2%} Potentially New</div></div>', unsafe_allow_html=True)
-
-                novel_df = results_df[results_df['status'] == 'Potentially Novel'].copy()
-                if not novel_df.empty:
-                    st.subheader("Discovery Mode: Cluster View of Novel Sequences")
-                    with st.spinner("Running UMAP clustering..."):
-                        novel_embeddings = embeddings[novel_df.index]
-                        n_neighbors = max(2, min(15, len(novel_embeddings) - 1))
-                        if n_neighbors > 1:
-                            reducer = umap.UMAP(n_neighbors=n_neighbors, n_components=2, min_dist=0.0)
-                            embedding_2d = reducer.fit_transform(novel_embeddings)
-                            novel_df['umap_x'], novel_df['umap_y'] = embedding_2d[:,0], embedding_2d[:,1]
-                            fig_umap = px.scatter(novel_df, x='umap_x', y='umap_y', hover_name='header', color='phylum_pred', title='UMAP Clustering of Potentially Novel Sequences', labels={'umap_x': 'Dimension 1', 'umap_y': 'Dimension 2'})
-                            fig_umap.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-                            st.plotly_chart(fig_umap, use_container_width=True)
-                        else: 
-                            st.warning("Not enough novel sequences found to create a meaningful cluster plot.")
-                
-                st.subheader("Full Classification Results")
-                
-                @st.cache_data
-                def convert_df_to_csv(df):
-                    return df.to_csv(index=False).encode('utf-8')
-
-                csv_data = convert_df_to_csv(results_df)
-                
-                st.download_button(
-                   label="📥 Download Full Results as CSV",
-                   data=csv_data,
-                   file_name='biodiversity_analysis_results.csv',
-                   mime='text/csv',
-                   use_container_width=True
-                )
                 st.dataframe(results_df)
 
 def page_model_details(test_accuracies, num_classes):
@@ -406,7 +276,6 @@ def page_model_details(test_accuracies, num_classes):
         with st.container(border=True):
             st.subheader("Model Architecture")
             st.write("A **1D Convolutional Neural Network (CNN)** with a multi-head output, built in PyTorch.")
-            st.image(r"C:\Users\MYNK\Downloads\Gemini_Generated_Image_ow88weow88weow88_1.png", caption="Detailed Diagram of the 1D CNN Architecture")
             
     with col2:
         with st.container(border=True):
@@ -416,8 +285,6 @@ def page_model_details(test_accuracies, num_classes):
                 acc_df = pd.DataFrame(test_accuracies.items(), columns=['Taxonomic Rank', 'Accuracy'])
                 acc_df['Taxonomic Rank'] = acc_df['Taxonomic Rank'].str.capitalize()
                 st.table(acc_df.style.format({'Accuracy': '{:.2%}'}))
-            else: 
-                st.warning("Test accuracy data not found in model file.")
                 
     with st.container(border=True):
         st.subheader("Training Data Overview")
@@ -434,7 +301,6 @@ page = st.sidebar.radio("Navigation", ["🔬 Live Classifier", "📊 Biodiversit
 st.sidebar.markdown("---")
 st.sidebar.info("This application is the final deliverable of the AI-driven pipeline for deep-sea eDNA analysis.")
 
-# --- Improved Loading Experience ---
 with st.spinner("Initializing AI model... This may take a moment on first run."):
     model, inverse_mappings, test_accuracies, num_classes_dict, device = load_model_and_dependencies()
 
