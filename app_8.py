@@ -133,7 +133,6 @@ def preprocess_sequences(sequences_dict):
     return torch.tensor(encoded, dtype=torch.float32)
 
 def predict_batch(model, sequence_tensor, device, batch_size=128):
-    # This try/except wraps the ENTIRE logic and safely returns the error as text
     try:
         dataset = TensorDataset(sequence_tensor)
         loader = DataLoader(dataset, batch_size=batch_size)
@@ -163,7 +162,6 @@ def predict_batch(model, sequence_tensor, device, batch_size=128):
                     
         return all_predictions, np.vstack(all_embeddings)
     except Exception as e:
-        # Instead of crashing, we return the error back to the app page
         error_trace = traceback.format_exc()
         return [{"error_caught": True, "trace": error_trace}], None
 
@@ -189,7 +187,6 @@ def page_live_classifier(model, inverse_mappings, device):
                 predictions, embeddings = predict_batch(model, preprocess_sequences({"seq": sequence_input}), device)
                 loading_placeholder.empty()
                 
-                # If embeddings is None, our error trapper caught a crash!
                 if embeddings is None:
                     st.error("🚨 PyTorch Crash Captured! Streamlit can't hide it this time.")
                     st.code(predictions[0]["trace"])
@@ -219,7 +216,12 @@ def page_biodiversity_dashboard(model, inverse_mappings, device):
     st.header("📊 Batch File Biodiversity Dashboard")
     with st.container(border=True):
         uploaded_file = st.file_uploader("Upload a FASTA file of eDNA reads", type=["fasta", "fa", "txt"])
+        
         if uploaded_file:
+            # Warn user if the file is large
+            if uploaded_file.size > LARGE_FILE_WARNING_MB * 1024 * 1024:
+                st.warning(f"⚠️ **Large File Detected** ({uploaded_file.size / (1024*1024):.1f} MB). Processing may be slow. Use the slider below to analyze a manageable subset to prevent the app from running out of memory.")
+            
             file_content = uploaded_file.read().decode("utf-8")
             sequences = parse_fasta(file_content)
             
@@ -227,7 +229,7 @@ def page_biodiversity_dashboard(model, inverse_mappings, device):
                 st.error("No valid sequences found in the uploaded file.")
                 return
             
-            max_seq = st.slider("Select number of sequences to analyze:", 1, len(sequences), min(500, len(sequences)))
+            max_seq = st.slider("Select number of sequences to analyze:", 1, len(sequences), min(500, len(sequences)), help="To ensure performance, analyze a subset of very large files.")
             sequences_to_process = dict(list(sequences.items())[:max_seq])
 
             if st.button(f"Analyze {max_seq} Sequences", key="batch_button", use_container_width=True):
@@ -267,6 +269,65 @@ def page_biodiversity_dashboard(model, inverse_mappings, device):
                 results_df = pd.DataFrame(results_list)
 
                 st.subheader("Biodiversity Overview")
+                
+                # --- VISUALIZATION BLOCK ---
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.markdown("**Taxonomic Composition**")
+                    sunburst_df = results_df[[f'{rank}_pred' for rank in LABEL_COLUMNS]].copy()
+                    sunburst_df.columns = LABEL_COLUMNS
+                    fig = px.sunburst(sunburst_df, path=LABEL_COLUMNS, color_discrete_sequence=px.colors.qualitative.Pastel)
+                    fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                with col2: 
+                    st.markdown("**Top 10 Genera**")
+                    top_genera = results_df['genus_pred'].value_counts().nlargest(10)
+                    fig2 = px.bar(top_genera, x=top_genera.values, y=top_genera.index, orientation='h', labels={'y':'', 'x':'Count'})
+                    fig2.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                    st.plotly_chart(fig2, use_container_width=True)
+                    
+                with col3:
+                    st.markdown("**Discovery Analysis**")
+                    novel_count = (results_df['status'] == 'Potentially Novel').sum()
+                    st.markdown(f'<div class="metric-card"><div class="metric-card-label">Novelty Score</div><div class="metric-card-value">{novel_count} / {len(results_df)}</div><div class="metric-card-delta">{(novel_count/len(results_df)):.2%} Potentially New</div></div>', unsafe_allow_html=True)
+
+                novel_df = results_df[results_df['status'] == 'Potentially Novel'].copy()
+                if not novel_df.empty:
+                    st.subheader("Discovery Mode: Cluster View of Novel Sequences")
+                    with st.spinner("Running UMAP clustering..."):
+                        novel_embeddings = embeddings[novel_df.index]
+                        n_neighbors = max(2, min(15, len(novel_embeddings) - 1))
+                        
+                        if n_neighbors > 1:
+                            reducer = umap.UMAP(n_neighbors=n_neighbors, n_components=2, min_dist=0.0)
+                            embedding_2d = reducer.fit_transform(novel_embeddings)
+                            novel_df['umap_x'], novel_df['umap_y'] = embedding_2d[:,0], embedding_2d[:,1]
+                            
+                            fig_umap = px.scatter(novel_df, x='umap_x', y='umap_y', hover_name='header', color='phylum_pred', title='UMAP Clustering of Potentially Novel Sequences', labels={'umap_x': 'Dimension 1', 'umap_y': 'Dimension 2'})
+                            fig_umap.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                            st.plotly_chart(fig_umap, use_container_width=True)
+                        else: 
+                            st.warning("Not enough novel sequences found to create a meaningful cluster plot.")
+                
+                # --- DOWNLOAD BUTTON ---
+                st.subheader("Full Classification Results")
+                
+                @st.cache_data
+                def convert_df_to_csv(df):
+                    return df.to_csv(index=False).encode('utf-8')
+
+                csv_data = convert_df_to_csv(results_df)
+                
+                st.download_button(
+                   label="📥 Download Full Results as CSV",
+                   data=csv_data,
+                   file_name='biodiversity_analysis_results.csv',
+                   mime='text/csv',
+                   use_container_width=True
+                )
+                
                 st.dataframe(results_df)
 
 def page_model_details(test_accuracies, num_classes):
